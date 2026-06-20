@@ -3,11 +3,17 @@ from tkinter import ttk, messagebox
 import requests
 import datetime
 
+# Integração do Matplotlib com Tkinter
+import matplotlib
+
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
 API_URL = "http://127.0.0.1:8000"
 
+
 # --- COMPONENTES VISUAIS ---
-
-
 class ScoreBoard(tk.Frame):
     """Componente responsável pelos contadores de Alta e Queda."""
 
@@ -128,26 +134,153 @@ class DataGrid(tk.Frame):
 
 
 # --- CLASSE ORQUESTRADORA (APP PRINCIPAL) ---
-
-
 class AppMonitor:
     def __init__(self, root):
         self.root = root
-        self.root.title("Monitor de Investimentos")
-        self.root.geometry("750x500")
+        self.root.title("Monitor de Investimentos Macro")
+        self.root.geometry("1300x850")
 
         self.is_running = False
         self.loop_id = None
+        self.cached_investments = (
+            []
+        )  # Armazena os últimos dados para renderizar nos gráficos
 
-        # Instanciando Componentes Limpos
-        self.score_board = ScoreBoard(self.root)
+        # 1. Criação do Sistema de Abas (Notebook)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # 2. Definição dos frames containers de cada aba
+        self.tab_monitor = ttk.Frame(self.notebook)
+        self.tab_graphs = ttk.Frame(self.notebook)
+
+        self.notebook.add(self.tab_monitor, text="📊 Monitoramento")
+        self.notebook.add(self.tab_graphs, text="📈 Gráficos Analíticos")
+
+        # 3. Inicialização dos componentes internos da Aba 1 (Monitoramento)
+        self.score_board = ScoreBoard(self.tab_monitor)
         self.control_panel = ControlPanel(
-            self.root, self.start_automation, self.stop_automation
+            self.tab_monitor, self.start_automation, self.stop_automation
         )
-        self.data_grid = DataGrid(self.root)
+        self.data_grid = DataGrid(self.tab_monitor)
 
-        # Puxa os dados iniciais do banco
+        # 4. Inicialização do Canvas de Gráficos na Aba 2 (Gráficos)
+        self.setup_graphs_layout()
+
+        # Puxa os dados iniciais do banco local
         self.load_stored_data()
+
+    def setup_graphs_layout(self):
+        """Prepara o container do Matplotlib dentro da aba de gráficos."""
+        # Criamos uma figura com 3 subplots (1 linha, 3 colunas)
+        self.fig, (self.ax_comm, self.ax_rates, self.ax_forex) = plt.subplots(
+            1, 3, figsize=(15, 5)
+        )
+        self.fig.patch.set_facecolor("#f0f0f0")  # Cor de fundo padrão cinza do Tkinter
+
+        # Cria o widget de canvas do matplotlib acoplado ao Tkinter
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.tab_graphs)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+
+        # Renderiza os gráficos vazios inicialmente
+        self.render_charts()
+
+    def render_charts(self):
+        """Limpa os eixos e redesenha os gráficos analíticos macro com dados reais."""
+        # Reseta os subplots para evitar sobreposição de linhas/barras
+        self.ax_comm.clear()
+        self.ax_rates.clear()
+        self.ax_forex.clear()
+
+        # Dicionários de agrupamento macro com base nos tickers salvos no banco
+        commodity_map = {
+            "BZ=F": "Brent",
+            "GC=F": "Ouro",
+            "HG=F": "Cobre",
+            "ZS=F": "Soja",
+        }
+        rate_map = {"^IRX": "2 Anos", "^FVX": "5 Anos", "^TNX": "10 Anos"}
+        forex_map = {
+            "MXN=X": "Peso MX",
+            "NOK=X": "Coroa NO",
+            "KRW=X": "Won KR",
+            "EURBRL=X": "Euro/BRL",
+        }
+
+        # Listas para coletar dados filtrados do loop
+        comm_labels, comm_vars = [], []
+        rate_labels, rate_prices = [], []
+        forex_labels, forex_vars = [], []
+
+        # Filtra os dados da API salvos no cache para preencher as métricas dos gráficos
+        for inv in self.cached_investments:
+            code = inv.get("code")
+            # Correção de tipagem se a variação ou preço vier como string ou formato incorreto
+            try:
+                var_val = float(inv.get("variation_percentage", 0.0)) * 100
+                price_val = float(inv.get("current_price", 0.0))
+            except (ValueError, TypeError):
+                var_val = 0.0
+                price_val = 0.0
+
+            if code in commodity_map:
+                comm_labels.append(commodity_map[code])
+                comm_vars.append(var_val)
+            elif code in rate_map:
+                rate_labels.append(rate_map[code])
+                rate_prices.append(price_val)
+            elif code in forex_map:
+                forex_labels.append(forex_map[code])
+                forex_vars.append(var_val)
+
+        # --- GRÁFICO 1: Termômetro de Commodities (Barras Horizontais) ---
+        if comm_labels:
+            colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in comm_vars]
+            self.ax_comm.barh(comm_labels, comm_vars, color=colors, edgecolor="grey")
+            self.ax_comm.axvline(0, color="black", linewidth=0.8, linestyle="--")
+        self.ax_comm.set_title(
+            "Commodities (Variação %)", fontsize=10, fontweight="bold"
+        )
+        self.ax_comm.grid(True, linestyle=":", alpha=0.5)
+
+        # --- GRÁFICO 2: Curva de Juros EUA / Treasuries (Linha de Rendimento) ---
+        if rate_labels:
+            # Ordena os prazos (2Y -> 5Y -> 10Y) para a linha fazer sentido macroeconômico
+            order = {"2 Anos": 0, "5 Anos": 1, "10 Anos": 2}
+            sorted_rates = sorted(
+                zip(rate_labels, rate_prices), key=lambda x: order.get(x[0], 9)
+            )
+            r_labels, r_prices = zip(*sorted_rates)
+
+            self.ax_rates.plot(
+                r_labels,
+                r_prices,
+                marker="o",
+                color="#2980b9",
+                linewidth=2,
+                markersize=6,
+            )
+        self.ax_rates.set_title(
+            "Curva de Juros EUA (Rendimento %)", fontsize=10, fontweight="bold"
+        )
+        self.ax_rates.grid(True, linestyle=":", alpha=0.5)
+
+        # --- GRÁFICO 3: Câmbio e Moedas Globais (Barras Verticais) ---
+        if forex_labels:
+            colors_fx = ["#2ecc71" if v >= 0 else "#e74c3c" for v in forex_vars]
+            self.ax_forex.bar(
+                forex_labels, forex_vars, color=colors_fx, edgecolor="grey"
+            )
+            self.ax_forex.axhline(0, color="black", linewidth=0.8, linestyle="--")
+        self.ax_forex.set_title(
+            "Moedas vs Dólar (Variação %)", fontsize=10, fontweight="bold"
+        )
+        self.ax_forex.grid(True, linestyle=":", alpha=0.5)
+        plt.setp(self.ax_forex.get_xticklabels(), rotation=15, ha="right")
+
+        # Ajusta as margens e atualiza o Canvas dentro do loop do Tkinter
+        self.fig.tight_layout()
+        self.canvas.draw()
 
     def start_automation(self):
         self.is_running = True
@@ -163,19 +296,17 @@ class AppMonitor:
     def load_stored_data(self):
         try:
             self.data_grid.clear()
-
-            # Adicionamos timeout=5 para evitar o congelamento da tela
             response = requests.get(f"{API_URL}/api/investments", timeout=5)
 
             if response.status_code != 200:
                 print("⚠️ Não foi possível recuperar os dados do banco.")
                 return
 
-            investments = response.json()
+            self.cached_investments = response.json()
             alta_counter = 0
             queda_counter = 0
 
-            for inv in investments:
+            for inv in self.cached_investments:
                 status = inv.get("classification", "Aguardando Carga")
 
                 if "Alta" in status:
@@ -183,18 +314,31 @@ class AppMonitor:
                 elif "Queda" in status:
                     queda_counter += 1
 
+                # Formata exibição da variação salva vinda do banco
+                try:
+                    raw_var = float(inv.get("variation", 0.0))
+                    # Se já estiver multiplicada no banco exibe direto, senão formata
+                    formatted_var = (
+                        f"{raw_var:.2f}%"
+                        if raw_var > 1 or raw_var < -1
+                        else f"{raw_var * 100:.2f}%"
+                    )
+                except (ValueError, TypeError):
+                    formatted_var = "0.00%"
+
                 self.data_grid.insert_row(
                     (
                         inv.get("name"),
                         inv.get("code"),
                         inv.get("previous_price", 0.0),
                         inv.get("current_price", 0.0),
-                        f"{inv.get('variation', 0.0)}%",
+                        formatted_var,
                         status,
                     )
                 )
 
             self.score_board.update_scores(alta_counter, queda_counter)
+            self.render_charts()  # Plota os gráficos com o histórico inicial recuperado
 
         except requests.exceptions.Timeout:
             print("⏳ Erro: O servidor demorou muito para responder (Timeout).")
@@ -215,13 +359,13 @@ class AppMonitor:
             response = requests.get(f"{API_URL}/api/latest")
 
             if response.status_code == 200:
-                api_data = response.json()
+                self.cached_investments = response.json()
                 self.data_grid.clear()
 
                 alta_counter = 0
                 queda_counter = 0
 
-                for d in api_data:
+                for d in self.cached_investments:
                     status = d.get("classification", "Aguardando Carga")
 
                     if "Alta" in status:
@@ -229,7 +373,13 @@ class AppMonitor:
                     elif "Queda" in status:
                         queda_counter += 1
 
-                    formatted_var = f"{d.get('variation_percentage', 0.0) * 100:.2f}%"
+                    # Caso o backend multiplique por 100, exibe direto, senão multiplica
+                    raw_pct = d.get("variation_percentage", 0.0)
+                    if -1.0 <= raw_pct <= 1.0 and raw_pct != 0:
+                        formatted_var = f"{raw_pct * 100:.2f}%"
+                    else:
+                        formatted_var = f"{raw_pct:.2f}%"
+
                     self.data_grid.insert_row(
                         (
                             d.get("name", ""),
@@ -242,6 +392,8 @@ class AppMonitor:
                     )
 
                 self.score_board.update_scores(alta_counter, queda_counter)
+                self.render_charts()  # Atualiza dinamicamente as barras e linhas do gráfico em tempo real
+
                 self.control_panel.set_status(
                     f"Última atualização: {current_time}", "green"
                 )
@@ -258,6 +410,7 @@ class AppMonitor:
             )
             return
 
+        # Mantém a automação atualizando em background a cada 5 segundos
         self.loop_id = self.root.after(5000, self.update_data)
 
 
