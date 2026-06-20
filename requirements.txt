@@ -1,0 +1,5 @@
+yfinance
+matplotlib
+FastAPI
+uvicorn
+pydantic
