@@ -20,3 +20,10 @@ def sync_multiple_investments(payload: BulkSyncRequest):
     Sincroniza uma lista de ativos com o Yahoo Finance de uma só vez.
     """
     return InvestmentController.sync_multiple_investments(payload.items)
+
+@router.get("/latest", response_model=List[InvestmentResponse])
+def get_latest_data():
+    """
+    Returns the latest available data from the local database.
+    """
+    return InvestmentController.get_latest_investments()

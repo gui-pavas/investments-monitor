@@ -41,14 +41,36 @@ class InvestmentController:
         return results
 
     @staticmethod
+    def get_latest_investments() -> List[dict]:
+        """
+        Retrieves the most recent record for each asset from the database.
+        """
+        # Added current_price to the SELECT query
+        query = """
+            SELECT name, classification, code, extended_negotiation, 
+                extended_negotiation_percentage, previous, current_price, variation_percentage
+            FROM investments 
+            WHERE id IN (
+                SELECT MAX(id) 
+                FROM investments 
+                GROUP BY code
+            )
+        """
+        rows = db.fetch_all(query)
+
+        # Convert sqlite3.Row objects to standard Python dictionaries
+        return [dict(row) for row in rows]
+
+    @staticmethod
     def _save_to_db(data: dict) -> int:
         """
         Helper method to insert the investment data into the SQLite database.
         """
+        # Added current_price to the INSERT query and values
         query = """
             INSERT INTO investments 
-            (name, classification, code, extended_negotiation, extended_negotiation_percentage, previous, variation_percentage) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (name, classification, code, extended_negotiation, extended_negotiation_percentage, previous, current_price, variation_percentage) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             data["name"],
@@ -57,6 +79,7 @@ class InvestmentController:
             data.get("extended_negotiation"),
             data.get("extended_negotiation_percentage"),
             data["previous"],
+            data["current_price"],  # Getting the current price from the dictionary
             data["variation_percentage"],
         )
 
