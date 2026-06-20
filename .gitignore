@@ -10,3 +10,8 @@ env/
 # banco de
 *.db
 *.sqlite3
+
+#build files
+/dist
+/build
+*.spec

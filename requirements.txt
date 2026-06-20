@@ -4,3 +4,4 @@ FastAPI
 uvicorn
 pydantic
 apscheduler
+PyInstaller

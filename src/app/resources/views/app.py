@@ -1,12 +1,17 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+
 import requests
 import datetime
 
-# Integração do Matplotlib com Tkinter
+import subprocess
+import sys
+import os
+
 import matplotlib
 
 matplotlib.use("TkAgg")
+
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
@@ -415,6 +420,19 @@ class AppMonitor:
 
 
 if __name__ == "__main__":
+    backend_process = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "src.app.server:app", "--port", "8000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
     root = tk.Tk()
     app = AppMonitor(root)
+
+    # Garante que quando o cliente fechar a janela do Tkinter, o Uvicorn também morra
+    def on_closing():
+        backend_process.terminate()  # Mata o Uvicorn
+        root.destroy()  # Fecha o Tkinter
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
